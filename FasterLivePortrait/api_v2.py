@@ -1,14 +1,15 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 """
 API v2: audio (wav) -> talking portrait.
 
-Optimized version: assumes all checkpoints already downloaded (no network calls).
 """
 import os
-import io
 import shutil
 import pickle
 import logging
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
@@ -133,7 +134,7 @@ def mux_audio_with_video(video_path: str, audio_path: str, output_path: str) -> 
 def run_with_audio(pipe, joy_pipe, source_image_path: str, audio_path: str, save_dir: str, 
                 flag_do_crop=True, flag_pasteback=True, driving_multiplier=1.0,
                 scale=2.3, vx_ratio=0.0, vy_ratio=-0.125, animation_region="all", 
-                cfg_scale=1.2) -> Tuple[Optional[str], Optional[str], str]:
+                cfg_scale=1.2) -> Optional[str]:
     """Generate talking portrait video from source image and audio."""
     pipe.init_vars()
     
@@ -177,10 +178,10 @@ def run_with_audio(pipe, joy_pipe, source_image_path: str, audio_path: str, save
         
         # Mux audio with videos
         mux_audio_with_video(result_path, audio_path, result_with_audio_path)
-        
-        return result_with_audio_path, motion_pickle_path
-    
-    return None, motion_pickle_path
+
+        return result_with_audio_path
+
+    return None
 
 
 @contextmanager
@@ -212,6 +213,7 @@ class PredictAudio:
         self._init_pipelines()
         self.results_dir.mkdir(exist_ok=True)
         app.post("/predict_audio/")(self.predict_audio_handler)
+        app.get("/ping")(self.ping_handler)
 
     def _init_pipelines(self):
         """Initialize the processing pipelines."""
@@ -238,6 +240,9 @@ class PredictAudio:
             shutil.copyfileobj(upload.file, f)
         return str(dest_path)
 
+    async def ping_handler(self):
+        return {"status": "ok"}
+
     async def predict_audio_handler(
             self,
             source_image: UploadFile = File(...),
@@ -262,7 +267,7 @@ class PredictAudio:
             audio_path = self._save_uploaded_file_to_tempdir(driving_audio, temp_dir)
             
             # Generate videos
-            org_mp4, crop_mp4, motion_pkl = run_with_audio(
+            org_mp4  = run_with_audio(
                 self.flp_pipe, self.joy_pipe, source_path, audio_path, save_dir,
                 flag_do_crop=flag_do_crop,
                 flag_pasteback=flag_pasteback,
@@ -287,6 +292,15 @@ predict_audio_api = PredictAudio(app)
 
 
 if __name__ == "__main__":
+    warnings.filterwarnings(
+        "ignore",
+        message="torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument.*"
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="Default grid_sample and affine_grid behavior has changed.*"
+    )
+    
     uvicorn.run(
         app,
         host=os.environ.get("BIND_HOST", "0.0.0.0"),
