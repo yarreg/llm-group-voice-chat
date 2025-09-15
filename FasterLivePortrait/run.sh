@@ -10,6 +10,7 @@ CONTAINER_ID=$(docker run -it -d \
     --name $CONTAINER_NAME \
     -v $(pwd)/api_v2.py:/root/FasterLivePortrait/api_v2.py \
     -v $(pwd)/src:/root/FasterLivePortrait/src \
+    -v $(pwd)/configs:/root/FasterLivePortrait/configs \
     -p 8081:8081 \
     --gpus all \
     flp1_data \
