@@ -1,2 +1,5 @@
 FasterLivePortrait/src/
 FasterLivePortrait/assets/
+.venv/
+__pycache__/
+*.pyc
