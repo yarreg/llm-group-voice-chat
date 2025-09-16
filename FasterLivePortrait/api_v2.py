@@ -47,8 +47,8 @@ def run_ffmpeg(params: List[str]) -> None:
 
 @contextmanager
 def video_writer_context(file_path: str, fps: int, frame_size: Tuple[int, int]):
-    """Context manager for video writing to ensure proper resource cleanup."""
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    """Context manager for video writing to ensure proper resource cleanup - OPTIMIZED."""
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use original codec
     writer = cv2.VideoWriter(file_path, fourcc, fps, frame_size)
     try:
         yield writer
@@ -58,8 +58,11 @@ def video_writer_context(file_path: str, fps: int, frame_size: Tuple[int, int]):
 
 def process_motion_frames(pipe, motion_infos: Dict[str, Any], source_img, source_info) -> List:
     """Process motion frames and return cropped and original frames with robust fallbacks."""
+    start_time = time()
+    print(f"[PROFILE] process_motion_frames started")
     motion_list = motion_infos["motion"]
     n = len(motion_list)
+    print(f"[PROFILE] Processing {n} frames")
 
     def ensure_list(key_main: str, key_fallback: str) -> List[Any]:
         if key_main in motion_infos and isinstance(motion_infos[key_main], list):
@@ -67,8 +70,8 @@ def process_motion_frames(pipe, motion_infos: Dict[str, Any], source_img, source
         elif key_fallback in motion_infos and isinstance(motion_infos[key_fallback], list):
             lst = motion_infos[key_fallback]
         else:
-            lst = [None] * n  
-        
+            lst = [None] * n
+
         if len(lst) < n:
             last = lst[-1] if lst else None
             lst = lst + [last] * (n - len(lst))
@@ -79,66 +82,130 @@ def process_motion_frames(pipe, motion_infos: Dict[str, Any], source_img, source
     c_eyes_list = ensure_list("c_eyes_lst", "c_d_eyes_lst")
     c_lip_list  = ensure_list("c_lip_lst",  "c_d_lip_lst")
 
-    frames = []
-    for frame_idx in range(n):
+    frames: List[np.ndarray] = []
+    frame_processing_start = time()
+
+    frame_skip = 2
+    pipeline_frames = 0
+    last_frame_bgr: Optional[np.ndarray] = None
+
+    for frame_idx in range(0, n, frame_skip):
+        frame_start = time()
         motion_info = [motion_list[frame_idx], c_eyes_list[frame_idx], c_lip_list[frame_idx]]
         _, out_org = pipe.run_with_pkl(
             motion_info, source_img, source_info, first_frame=(frame_idx == 0)
         )[:2]
-        if out_org is not None:
-            frames.append(cv2.cvtColor(out_org, cv2.COLOR_RGB2BGR))
 
+        if out_org is not None:
+            frame_bgr = cv2.cvtColor(out_org, cv2.COLOR_RGB2BGR)
+            last_frame_bgr = frame_bgr
+            pipeline_frames += 1
+        elif last_frame_bgr is not None:
+            frame_bgr = last_frame_bgr
+        else:
+            continue
+
+        if not frames:
+            frames.append(frame_bgr)
+        else:
+            prev_frame_bgr = frames[-1]
+            gap = min(frame_skip, n - len(frames))
+            if gap <= 0:
+                gap = frame_skip
+            for offset in range(1, gap):
+                alpha = offset / gap
+                interp = cv2.addWeighted(prev_frame_bgr, 1 - alpha, frame_bgr, alpha, 0)
+                frames.append(interp)
+            frames.append(frame_bgr)
+
+        if frame_idx < 10 or frame_idx >= n - 10:
+            print(f"[PROFILE] Frame {frame_idx} processing took {time() - frame_start:.3f}s")
+
+    if len(frames) < n and last_frame_bgr is not None:
+        gap = n - len(frames)
+        for offset in range(1, gap + 1):
+            frames.append(last_frame_bgr.copy())
+    elif len(frames) > n:
+        frames = frames[:n]
+
+    total_time = time() - start_time
+    avg_frame_time = (time() - frame_processing_start) / pipeline_frames if pipeline_frames > 0 else 0
+    print(f"[PROFILE] process_motion_frames total time: {total_time:.3f}s, processed {pipeline_frames}/{n} keyframes, avg per keyframe: {avg_frame_time:.3f}s, output frames: {len(frames)}")
     return frames
 
 
-def run_with_pkl(pipe, source_image_path: str, driving_pickle_path: str, save_dir: str) -> str:
+def run_with_pkl(pipe, source_image_path: str, driving_pickle_path: str, save_dir: str,
+                 use_cached_source: bool = False) -> str:
     """Generate video from source image and driving pickle file."""
-    if not pipe.prepare_source(source_image_path, realtime=False):
-        logger.warning(f"No face detected in {source_image_path}")
-        return None
-    
+    start_time = time()
+    print(f"[PROFILE] run_with_pkl started")
+
+    if not use_cached_source or not getattr(pipe, "src_imgs", None):
+        if not pipe.prepare_source(source_image_path, realtime=False):
+            logger.warning(f"No face detected in {source_image_path}")
+            return None
+
+    load_start = time()
     with open(driving_pickle_path, "rb") as f:
         motion_infos = pickle.load(f)
-    
+    print(f"[PROFILE] Loading pickle took {time() - load_start:.3f}s")
+
     fps = int(motion_infos["output_fps"])
+    if not pipe.src_imgs:
+        raise RuntimeError("Source images not prepared")
     h, w = pipe.src_imgs[0].shape[:2]
-    
+
     # Generate output file paths
     base_name = f"{Path(source_image_path).stem}-{Path(driving_pickle_path).stem}"
     save_dir_path = Path(save_dir)
     result_path = str(save_dir_path / f"{base_name}-res.mp4")
-    
+
     # Process frames
+    frames_start = time()
     frames = process_motion_frames(pipe, motion_infos, pipe.src_imgs[0], pipe.src_infos[0])
-    
-    with video_writer_context(result_path, fps, (w, h)) as org_writer:
+    print(f"[PROFILE] Frame processing took {time() - frames_start:.3f}s for {len(frames)} frames")
+
+    adjusted_fps = fps
+    print(f"[PROFILE] Adjusted FPS from {fps} to {adjusted_fps}")
+
+    write_start = time()
+    with video_writer_context(result_path, adjusted_fps, (w, h)) as org_writer:
         for frame in frames:
             org_writer.write(frame)
-    
+    print(f"[PROFILE] Video writing took {time() - write_start:.3f}s")
+
+    total_time = time() - start_time
+    print(f"[PROFILE] run_with_pkl total time: {total_time:.3f}s")
     return result_path
 
 
-def mux_audio_with_video(video_path: str, audio_path: str, output_path: str) -> None:
-    """Combine video with audio using ffmpeg."""
-    duration, fps = utils.get_video_info(video_path)
+def mux_audio_with_video_ultrafast(video_path: str, audio_path: str, output_path: str) -> None:
+    """ffmpeg: ultrafast + высокий CRF."""
     run_ffmpeg([
         '-i', video_path, '-i', audio_path,
-        '-b:v', '10M', '-c:v', 'libx264',
-        '-map', '0:v', '-map', '1:a',
-        '-c:a', 'aac', '-pix_fmt', 'yuv420p',
-        '-shortest', '-t', str(duration),
-        '-r', str(fps), output_path, '-y'
+        '-map', '0:v:0', '-map', '1:a:0',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '28',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '96k',
+        '-shortest',
+        '-movflags', '+faststart',
+        '-threads', '0',
+        '-y', output_path
     ])
 
 
-def run_with_audio(pipe, joy_pipe, source_image_path: str, audio_path: str, save_dir: str, 
+def run_with_audio(pipe, joy_pipe, source_image_path: str, audio_path: str, save_dir: str,
                 flag_do_crop=True, flag_pasteback=True, driving_multiplier=1.0,
-                scale=2.3, vx_ratio=0.0, vy_ratio=-0.125, animation_region="all", 
+                scale=2.3, vx_ratio=0.0, vy_ratio=-0.125, animation_region="all",
                 cfg_scale=1.2) -> Optional[str]:
     """Generate talking portrait video from source image and audio."""
+    start_time = time()
+    print(f"[PROFILE] run_with_audio started")
+
     pipe.init_vars()
-    
-    # Update configuration
+
+    # Update configuration - OPTIMIZED FOR PERFORMANCE
+    cfg_start = time()
     pipe.update_cfg({
         'flag_relative_motion': False,
         'flag_do_crop': flag_do_crop,
@@ -157,28 +224,39 @@ def run_with_audio(pipe, joy_pipe, source_image_path: str, audio_path: str, save
         'dri_vy_ratio': -0.1,
         'driving_smooth_observation_variance': 1e-7,
     })
-            
+    print(f"[PROFILE] Config update took {time() - cfg_start:.3f}s")
+
     # Prepare source
+    source_start = time()
     if not pipe.prepare_source(source_image_path, realtime=False):
         raise RuntimeError("No face detected in source image")
-    
+    print(f"[PROFILE] Source preparation took {time() - source_start:.3f}s")
+
     # Generate motion sequence
+    motion_start = time()
     motion_infos = joy_pipe.gen_motion_sequence(audio_path)
     motion_pickle_path = Path(save_dir) / f"{Path(audio_path).stem}_motion.pkl"
-    
+
     with open(motion_pickle_path, 'wb') as f:
         pickle.dump(motion_infos, f)
-    
+    print(f"[PROFILE] Motion generation took {time() - motion_start:.3f}s")
+
     # Generate videos based on motion sequence
-    result_path = run_with_pkl(pipe, source_image_path, motion_pickle_path, save_dir)
-    
+    video_start = time()
+    result_path = run_with_pkl(pipe, source_image_path, motion_pickle_path, save_dir, use_cached_source=True)
+    print(f"[PROFILE] Video generation from pickle took {time() - video_start:.3f}s")
+
     if result_path:
         # Create output paths with audio
         result_with_audio_path = str(Path(result_path).with_name(f"{Path(result_path).stem}-audio.mp4"))
-        
-        # Mux audio with videos
-        mux_audio_with_video(result_path, audio_path, result_with_audio_path)
 
+        # Mux audio with videos
+        mux_start = time()
+        mux_audio_with_video_ultrafast(result_path, audio_path, result_with_audio_path)
+        print(f"[PROFILE] Audio muxing took {time() - mux_start:.3f}s")
+
+        total_time = time() - start_time
+        print(f"[PROFILE] run_with_audio total time: {total_time:.3f}s")
         return result_with_audio_path
 
     return None
@@ -258,15 +336,19 @@ class PredictAudio:
             background_tasks: BackgroundTasks = None
     ):
         start_time = time()
-        
+        print(f"[PROFILE] predict_audio_handler started at {start_time}")
+
         with temporary_directories(self.results_dir) as (save_dir, temp_dir):
             background_tasks.add_task(shutil.rmtree, save_dir, True)
-            
+
             # Resolve file paths
+            file_save_start = time()
             source_path = self._save_uploaded_file_to_tempdir(source_image, temp_dir)
             audio_path = self._save_uploaded_file_to_tempdir(driving_audio, temp_dir)
-            
+            print(f"[PROFILE] File saving took {time() - file_save_start:.3f}s")
+
             # Generate videos
+            generation_start = time()
             org_mp4  = run_with_audio(
                 self.flp_pipe, self.joy_pipe, source_path, audio_path, save_dir,
                 flag_do_crop=flag_do_crop,
@@ -278,12 +360,15 @@ class PredictAudio:
                 animation_region=animation_region,
                 cfg_scale=cfg_scale
             )
-            
-            logger.info(f"predict_audio completed in {time() - start_time:.2f}s")
+            print(f"[PROFILE] Video generation took {time() - generation_start:.3f}s")
+
+            total_time = time() - start_time
+            logger.info(f"predict_audio completed in {total_time:.2f}s")
+            print(f"[PROFILE] predict_audio_handler total time: {total_time:.3f}s")
 
             if org_mp4 is None:
                 raise HTTPException(status_code=400, detail="Video generation failed (no face detected?)")
-            
+
             return FileResponse(org_mp4, media_type="video/mp4", filename="output.mp4")
 
 
