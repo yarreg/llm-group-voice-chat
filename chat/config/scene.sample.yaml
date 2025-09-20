@@ -1,0 +1,45 @@
+schemaVersion: 1
+
+conversation:
+  id: "demo-scene"
+  title: "Product Demo Discussion"
+  mode: "round_robin"
+  max_turns: 10
+  start_speaker: "Alice"
+  termination_regex: "(STOP|END)"
+  allow_user_injection: true
+  allow_interrupt: true
+
+prompts:
+  global_system: |
+    Stay concise and focused on the product demo. Respond in Russian.
+
+actors:
+  - id: "alice"
+    name: "Alice"
+    color: "#FF6B6B"
+    avatar_image: "./assets/alice.jpg"
+    system_prompt: |
+      You are an enthusiastic host introducing the product.
+    extra_prompt: "Avoid slang."
+    llm_model: "demo-model"
+    voice:
+      voice_id: "female"
+
+  - id: "bob"
+    name: "Bob"
+    color: "#4D96FF"
+    avatar_image: "./assets/bob.jpg"
+    system_prompt: |
+      You are a skeptical product manager asking critical questions.
+    llm_model: "demo-model"
+    voice:
+      voice_id: "female"
+
+script:
+  seed_messages:
+    - role: "system"
+      content: "Topic: Should we launch feature X this quarter?"
+    - role: "user"
+      speaker: "Alice"
+      content: "Начинаем обсуждение. Боб, что думаешь?"

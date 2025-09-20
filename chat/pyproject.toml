@@ -1,0 +1,76 @@
+
+[project]
+name = "chat"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi==0.116.2",
+    "uvicorn[standard]==0.35.0",
+    "pydantic==2.11.9",
+    "PyYAML==6.0.2",
+    "httpx==0.28.1",
+    "autogen==0.7.4",
+    "autogen-ext==0.7.4",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.13.0",
+    "mypy==1.18.1",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+fix = false
+
+[tool.ruff.lint]
+select = [
+    "E402",
+    "PLC0415",
+    "TID",
+    "UP",
+    "I",
+    "B",
+    "C4",
+    "SIM",
+    "ARG",
+    "N",
+    "RUF",
+    "RET",
+    "COM",
+    "YTT",
+] 
+ignore = [
+    "RET504",
+    "COM812",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.params.Depends", "fastapi.Query", "fastapi.params.Query"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Drop `from __future__ import annotations` (target Python ≥ 3.12)."
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.12"
+install_types = true
+non_interactive = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+namespace_packages = true
+explicit_package_bases = true
+exclude = [
+    '\.venv',
+    'tests'
+]

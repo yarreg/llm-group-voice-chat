@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ conversation.title }} – JoyVASA</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="container py-4">
+    <header class="mb-4">
+        <h1 class="h3">{{ conversation.title }}</h1>
+        <p class="text-secondary">Conversation ID: {{ conversation.id }}</p>
+    </header>
+
+    <section class="row g-3" id="actor-grid">
+        {% for actor in actors %}
+        <div class="col-sm-6 col-md-4">
+            <div class="actor-card card h-100" data-actor-id="{{ actor.id }}" style="border-color: {{ actor.color }};">
+                <div class="card-header text-center" style="background: {{ actor.color }}33;">
+                    <strong>{{ actor.name }}</strong>
+                </div>
+                <div class="ratio ratio-4x3 bg-dark">
+                    <video class="actor-video" preload="auto" playsinline></video>
+                </div>
+                <div class="card-body text-center">
+                    <img class="actor-avatar rounded-circle" src="/api/thumbs/{{ actor.id }}.png" alt="Avatar {{ actor.name }}">
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+
+    <section class="chat-log mt-4" aria-live="polite" aria-label="Conversation transcript">
+        <ul class="list-unstyled" id="chat-list"></ul>
+    </section>
+
+    <section class="mt-4">
+        <form id="message-form" class="row g-2" autocomplete="off">
+            <div class="col-md-2">
+                <label for="speaker" class="form-label">Speak as</label>
+                <select id="speaker" class="form-select">
+                    {% for actor in actors %}
+                    <option value="{{ actor.id }}">{{ actor.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-9">
+                <label for="message" class="form-label">Message</label>
+                <div class="input-group">
+                    <input id="message" class="form-control" type="text" placeholder="Enter message...">
+                    <button type="submit" class="btn btn-primary">Send</button>
+                </div>
+            </div>
+        </form>
+        <div class="mt-3 btn-toolbar gap-2" role="toolbar">
+            <button class="btn btn-success" id="btn-start">Start</button>
+            <button class="btn btn-warning" id="btn-stop">Stop</button>
+            <button class="btn btn-secondary" id="btn-restart">Restart</button>
+        </div>
+    </section>
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    window.JOYVASA_CONTEXT = {
+        conversationId: "{{ conversation.id }}",
+        actors: {
+            {% for actor in actors %}
+            "{{ actor.id }}": {
+                id: "{{ actor.id }}",
+                name: "{{ actor.name }}",
+                color: "{{ actor.color }}"
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        }
+    };
+</script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

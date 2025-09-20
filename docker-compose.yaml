@@ -1,0 +1,44 @@
+version: '3.8'
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "1"
+
+services:
+  f5-tts-api:
+    image: f5_tts_api
+    container_name: f5_tts_api
+    restart: unless-stopped
+    environment:
+      - PORT=8082
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    ports:
+      - "8082:8082"
+    <<: [*gpu, *logging]
+
+  flp-api:
+    image: flp_api:trt
+    container_name: flp_api
+    tty: true
+    restart: unless-stopped
+    entrypoint: ["bash", "-ic", "python3 /root/FasterLivePortrait/api_v2.py"]
+    environment:
+      - HTTP_PORT=8083
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    ports:
+      - "8083:8083"
+    <<: [*gpu, *logging]
