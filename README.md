@@ -49,13 +49,13 @@ The system consists of three interconnected services:
 
 ### Setup
 
-1. Configure the chat application by following the instructions in the `chat/` README.md
-2. Update configuration files with your LLM credentials and service endpoints
+1. Configure and start the chat application by following the instructions in the `chat/README.md`
+2. Build docker images for TTS and FasterLivePortrait using Makefile:
     ```bash
     make build-flp
     make build-tts
     ```
-4. Start all services using Docker Compose:
+4. Start FasterLivePortrait and TTS using Docker Compose:
    ```bash
    docker-compose up -d
    ```
